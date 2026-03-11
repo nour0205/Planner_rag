@@ -1,4 +1,4 @@
-# AI Agent Platform — Retrieval-Augmented Generation with Planner Routing
+# AI Agent Platform: Retrieval-Augmented Generation with Planner Routing
 
 This project implements a **production-style Retrieval-Augmented Generation (RAG) backend** with safe routing, multi-document reasoning, and source-grounded answers.
 
