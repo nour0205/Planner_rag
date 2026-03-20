@@ -2,9 +2,10 @@
 __pycache__/
 *.pyc
 
-# environment
+# Virtual environments
 venv/
-.env
+venv_old/
+.venv/
 
 # vector db storage
 .chroma/

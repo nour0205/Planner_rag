@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from collections import defaultdict
 from pydantic import BaseModel
 import uuid
 
@@ -176,6 +177,86 @@ def debug_retrieve(req: QuestionRequest):
     return {"question": req.question, "results": results}
 
 
+# -------------------------------------------------------------------
+# list ingested documents
+# -------------------------------------------------------------------
+
+
+@app.get("/documents")
+def list_documents():
+    """
+    Return a grouped summary of ingested documents.
+    Groups chunks by document_id.
+    """
+    data = store.collection.get(
+        include=["metadatas", "documents"]
+    )
+
+    metadatas = data.get("metadatas", []) or []
+    documents = data.get("documents", []) or []
+
+    grouped = defaultdict(lambda: {
+        "document_id": None,
+        "chunks": 0,
+        "source": None,
+        "owner": None,
+        "preview": None,
+    })
+
+    for meta, doc_text in zip(metadatas, documents):
+        if not meta:
+            continue
+
+        document_id = meta.get("document_id", "unknown")
+        entry = grouped[document_id]
+
+        entry["document_id"] = document_id
+        entry["chunks"] += 1
+        entry["source"] = meta.get("source")
+        entry["owner"] = meta.get("owner")
+
+        if entry["preview"] is None and doc_text:
+            entry["preview"] = doc_text[:200]
+
+    return {
+        "documents": list(grouped.values()),
+        "count": len(grouped),
+    }
+
+
+# -------------------------------------------------------------------
+# document preview 
+# -------------------------------------------------------------------
+
+@app.get("/documents/{document_id}")
+def get_document_chunks(document_id: str):
+    data = store.collection.get(
+        where={"document_id": document_id},
+        include=["metadatas", "documents"]
+    )
+
+    ids = data.get("ids", []) or []
+    metadatas = data.get("metadatas", []) or []
+    documents = data.get("documents", []) or []
+
+    chunks = []
+    for chunk_id, meta, text in zip(ids, metadatas, documents):
+        chunks.append({
+            "id": chunk_id,
+            "document_id": meta.get("document_id"),
+            "chunk_index": meta.get("chunk_index"),
+            "source": meta.get("source"),
+            "owner": meta.get("owner"),
+            "text": text,
+        })
+
+    chunks.sort(key=lambda x: x.get("chunk_index", 0))
+
+    return {
+        "document_id": document_id,
+        "chunks": chunks,
+        "chunk_count": len(chunks),
+    }
 # -------------------------------------------------------------------
 # ASK ROUTED (single-doc OR multi-doc)
 # -------------------------------------------------------------------
