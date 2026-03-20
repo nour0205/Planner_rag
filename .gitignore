@@ -13,3 +13,5 @@ venv_old/
 # IDE
 .vscode/
 .idea/
+
+.env
