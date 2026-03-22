@@ -1,135 +1,158 @@
 # Planner RAG: Retrieval-Augmented Generation with Planner Routing
 
-Planner RAG is a production-style AI backend that answers questions using only ingested knowledge. It combines Retrieval-Augmented Generation (RAG), planner-based routing, reranking, and source-grounded generation to reduce hallucinations and make answers traceable.
+Planner RAG is a production-style AI backend for source-grounded question answering over ingested knowledge.
 
-The system is designed around a **planner → retriever → generator** pipeline, with explicit routing for single-document questions, multi-document comparisons, and unsupported queries.
+It combines **Retrieval-Augmented Generation (RAG)**, **planner-based routing**, **retrieval reranking**, and **evidence-constrained generation** to reduce hallucinations and make answers traceable to retrieved source chunks.
 
----
+Unlike basic RAG systems that send every query through the same retrieval path, Planner RAG first decides **how the question should be handled**. It supports:
 
-## What the project does
+- **single-document retrieval** for focused questions
+- **multi-document retrieval** for comparisons and synthesis
+- **unsupported-query refusal** when the answer cannot be grounded safely
 
-This project lets you:
+This makes the system more controllable, more explainable, and easier to evaluate.
 
-- ingest documents into a persistent vector database
-- prevent duplicate ingestion using SHA256 hashing
-- route questions through a planner
-- retrieve relevant chunks from ChromaDB
-- rerank retrieved chunks for better relevance
-- generate answers only from retrieved evidence
-- return source chunks with every grounded answer
-- explore the knowledge base from a simple Streamlit frontend
+## Overview
 
----
+The project is built around a **planner → retriever → generator** pipeline:
 
-## Architecture
+    User Question
+        ↓
+    Planner Agent
+        ↓
+    Execution Router
+        ↓
+    Vector Retrieval (ChromaDB)
+        ↓
+    Reranking
+        ↓
+    LLM Generation
+        ↓
+    Answer + Sources
 
-The system follows this flow:
+The planner decides whether a question should be answered from one document, multiple documents, or refused if it falls outside the supported knowledge base.
 
-```text
-User Question
-    ↓
-Planner Agent
-    ↓
-Execution Router
-    ↓
-Vector Retrieval (ChromaDB)
-    ↓
-Reranking
-    ↓
-LLM Generation
-    ↓
-Answer + Sources
-```
+## Key Features
 
----
+### Planner-based routing
 
-## Routing behavior
+Questions are classified before retrieval begins. The planner chooses one of three routes:
 
-The planner chooses one of three routes:
+- `single` — answer using one target document
+- `multi` — compare or combine evidence from multiple documents
+- `unknown` — refuse unsupported or unsafe questions
 
-- `single` → answer from one document
-- `multi` → compare or combine evidence from multiple documents
-- `unknown` → refuse unsupported or unsafe questions
+This routing layer makes the system safer and more structured than a one-size-fits-all RAG pipeline.
 
-This makes the system safer and easier to evaluate than sending every query through the same retrieval path.
+### Persistent vector knowledge base
 
----
+Documents are chunked, embedded, and stored in **ChromaDB** with persistent metadata, including:
 
-## Key features
-
-### Persistent knowledge base
-
-Documents are chunked, embedded, and stored in ChromaDB with metadata such as document ID, chunk index, source, owner, and document hash.
-
-### Safe planner routing
-
-Questions are first classified into routing strategies before retrieval starts.
-
-### Multi-document reasoning
-
-The system can compare concepts across multiple documents, such as:
-
-```text
-Compare PostgreSQL MVCC with SQL Server snapshot isolation.
-```
-
-### Evidence-based answers
-
-Answers are generated from retrieved context only, with source chunks returned in the response.
-
-### Retrieval reranking
-
-Initial retrieved chunks are reranked to improve answer quality.
+- document ID
+- chunk index
+- source
+- owner
+- document hash
 
 ### Ingestion safety
 
-Duplicate documents are detected by content hash, and document ID collisions are also prevented.
+The ingestion pipeline prevents duplicate content using **SHA256 hashing** and also guards against document ID conflicts.
+
+### Retrieval reranking
+
+Retrieved chunks are reranked before generation to improve relevance and answer quality.
+
+### Evidence-grounded generation
+
+Answers are generated only from retrieved evidence. Each grounded response includes the supporting source chunks used to produce it.
+
+### Multi-document reasoning
+
+The system can handle comparative questions across documents, such as:
+
+`Compare PostgreSQL MVCC with SQL Server snapshot isolation.`
 
 ### Evaluation suite
 
-Automated tests check planner routing, route behavior, answer grounding, and source attribution.
+The project includes automated evaluation for:
+
+- planner routing correctness
+- API route behavior
+- grounded answer behavior
+- source attribution presence
 
 ### Streamlit frontend
 
-A lightweight UI lets you:
+A lightweight Streamlit interface makes it easy to:
 
 - ingest documents
 - ask routed questions
-- inspect answers and sources
-- browse the ingested knowledge base
+- inspect answers and supporting sources
+- browse the knowledge base
 
----
+## What the Project Does
 
-## Project structure
+Planner RAG allows you to:
 
-```text
-app/
-│
-├── api/            FastAPI endpoints
-├── embeddings/     Embedding interface
-├── ingestion/      Document chunking
-├── llm/            LLM client
-├── orchestration/  Planner + routing logic
-├── rag/            Retrieval + generation pipeline
-├── vectordb/       Chroma vector store
-└── utils/          Shared utilities
+- ingest documents into a persistent vector database
+- prevent duplicate ingestion using content hashing
+- classify questions through a planner layer
+- retrieve relevant chunks from ChromaDB
+- rerank retrieved chunks for stronger relevance
+- generate answers constrained to retrieved evidence
+- return supporting source chunks with each answer
+- inspect the system through a simple frontend
 
-frontend/
-└── app.py          Streamlit frontend
-```
+## Architecture
+
+The system follows a modular backend structure:
+
+    app/
+    ├── api/            FastAPI endpoints
+    ├── embeddings/     Embedding interface
+    ├── ingestion/      Document chunking and preprocessing
+    ├── llm/            LLM client
+    ├── orchestration/  Planner and routing logic
+    ├── rag/            Retrieval and generation pipeline
+    ├── vectordb/       ChromaDB integration
+    └── utils/          Shared utilities
+
+    frontend/
+    └── app.py          Streamlit frontend
 
 ### Top-level files
 
-```text
-eval_cases.json     Evaluation test cases
-run_eval.py         Automated evaluation script
-requirements.txt    Dependencies
-README.md
-```
+    eval_cases.json     Evaluation test cases
+    run_eval.py         Automated evaluation script
+    requirements.txt    Project dependencies
+    README.md
 
----
 
-## API endpoints
+## Routing Behavior
+
+The planner explicitly selects one of the following execution paths:
+
+### `single`
+
+Used when the question targets one document or one system.
+
+Example: `How does MVCC work in PostgreSQL?`
+
+### `multi`
+
+Used when the question asks for comparison, contrast, or synthesis across multiple targets.
+
+Example: `Compare PostgreSQL MVCC with SQL Server snapshot isolation.`
+
+### `unknown`
+
+Used when the question cannot be grounded in the ingested knowledge base or falls outside supported routing behavior.
+
+Example: `What is the capital of Japan?`
+
+This explicit routing design improves reliability and makes system behavior easier to test.
+
+## API Endpoints
 
 ### `POST /ingest`
 
@@ -144,6 +167,7 @@ Ingest a document into the knowledge base.
 }
 ```
 
+
 #### Possible statuses
 
 - `ingested`
@@ -151,161 +175,117 @@ Ingest a document into the knowledge base.
 - `conflict`
 - `no content`
 
----
-
 ### `POST /ask`
 
-Single-document RAG query.
-
----
+Run a standard single-document RAG query.
 
 ### `POST /ask_routed`
 
-Question answering with planner-based routing.
+Run planner-based question answering with routed retrieval.
 
 #### Example response
 
-```json
-{
-  "answer": "...",
-  "route": "single",
-  "sources": [
     {
-      "document_id": "db_postgres",
-      "chunk_index": 1,
-      "text": "MVCC works by keeping multiple versions..."
+      "answer": "...",
+      "route": "single",
+      "sources": [
+        {
+          "document_id": "db_postgres",
+          "chunk_index": 1,
+          "text": "MVCC works by keeping multiple versions..."
+        }
+      ]
     }
-  ]
-}
-```
-
----
 
 ### `GET /documents`
 
-Returns a grouped summary of ingested documents in the knowledge base.
-
----
+Return a grouped summary of ingested documents in the knowledge base.
 
 ### `GET /documents/{document_id}`
 
-Returns all stored chunks for a specific document.
+Return all stored chunks for a specific document.
 
----
-
-## Running the project
+## Running the Project
 
 ### 1. Install dependencies
 
-```bash
-pip install -r requirements.txt
-```
+    pip install -r requirements.txt
 
 ### 2. Start the FastAPI backend
 
-```bash
-python -m uvicorn app.api.main:app --reload
-```
+    python -m uvicorn app.api.main:app --reload
 
-Backend URL:
-
-```text
-http://127.0.0.1:8000
-```
-
-Interactive docs:
-
-```text
-http://127.0.0.1:8000/docs
-```
+Backend: `http://127.0.0.1:8000`  
+Interactive API docs: `http://127.0.0.1:8000/docs`
 
 ### 3. Start the Streamlit frontend
 
-```bash
-python -m streamlit run frontend/app.py
-```
+    python -m streamlit run frontend/app.py
 
-Frontend usually runs at:
+Frontend: `http://localhost:8501`
 
-```text
-http://localhost:8501
-```
+## Frontend
 
----
+The Streamlit app includes three core views:
 
-## Frontend features
+- **Ask Questions** — submit routed queries and inspect answers
+- **Ingest Document** — add new knowledge to the vector database
+- **Knowledge Base** — browse ingested documents and chunk previews
 
-The Streamlit app includes:
-
-- **Ask Questions** tab for routed question answering
-- **Ingest Document** tab for adding new knowledge
-- **Knowledge Base** tab for viewing ingested documents and chunk previews
-
-This makes the system easier to demo, debug, and inspect.
-
----
+The frontend is designed for quick demos, debugging, and inspection of grounded system behavior.
 
 ## Evaluation
 
-Run the automated evaluation suite with:
+Run the evaluation suite with:
 
-```bash
-python run_eval.py
-```
+    python run_eval.py
 
 The evaluation checks:
 
 - planner routing correctness
-- API route decisions
+- API route selection
 - answer behavior
 - source presence
 
 ### Example output
 
-```text
-Planner: 4/4
-API route: 4/4
-Answer behavior: 4/4
-Sources presence: 4/4
-```
+    Planner: 4/4
+    API route: 4/4
+    Answer behavior: 4/4
+    Sources presence: 4/4
 
----
+This makes it easier to validate that the system is not only functional, but also behaving as intended.
 
-## Example use cases
+## Current Limitations
 
-This project can be adapted into systems like:
-
-- technical documentation assistant
-- internal company knowledge assistant
-- research comparison tool
-- course policy Q&A system
-- domain-specific document analysis assistant
-
----
-
-## Current limitations
+The current version has a few intentional limitations:
 
 - document routing depends on a curated registry
 - planner coverage is limited to supported domains
 - retrieval quality depends on chunking and metadata quality
-- reranking is basic and can be improved
-- unsupported new domains require manual registry updates
+- reranking is currently simple and can be improved
+- new unsupported domains may require manual routing updates
 
----
+## Future Improvements
 
-## Future improvements
-
-Possible next steps:
+Planned or possible next steps include:
 
 - dynamic document registry from ingestion metadata
-- hybrid search (BM25 + vector retrieval)
-- cross-encoder reranking
-- query rewriting
+- hybrid retrieval (`BM25 + vector search`)
+- stronger reranking with cross-encoders
+- query rewriting before retrieval
 - streaming responses
 - document deletion and management tools
-- richer frontend analytics and debugging views
+- richer frontend debugging and analytics views
+- more advanced evaluation coverage
 
----
+## Why This Project Matters
+
+Many RAG demos stop at basic retrieval and generation.
+
+Planner RAG goes a step further by introducing **explicit routing**, **grounded answer generation**, **source attribution**, and **evaluation-aware design**. The result is a more controlled and inspectable backend for knowledge-grounded QA.
+
+This project is meant to reflect a more production-oriented approach to building LLM systems.
 
 ## License
 
