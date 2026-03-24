@@ -1,3 +1,12 @@
+import re
+
+from app.llm.client import chat
+from app.rag.hybrid_retriever import hybrid_retrieve
+
+
+
+
+
 def build_rag_prompt(question: str, contexts: list[str]) -> list[dict]:
     # Label contexts so the model can cite them.
     context_block = "\n\n".join(
@@ -18,15 +27,11 @@ def build_rag_prompt(question: str, contexts: list[str]) -> list[dict]:
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
-from app.embeddings.embedder import embed_texts
-
-from app.llm.client import chat
-from app.rag.pipeline import build_rag_prompt  # (or keep in same file)
 
 
 
 
-import re
+
 
 
 STOPWORDS = {
@@ -63,7 +68,7 @@ def rerank_items(question: str, items: list[dict], k: int = 4) -> list[dict]:
     scored = []
 
     for original_rank, item in enumerate(items):
-        text = item["text"]
+        text = item.get("text") or item.get("document") or ""
         lexical_score = keyword_overlap_score(question, text)
 
         # small bonus for earlier vector retrieval rank
@@ -76,17 +81,22 @@ def rerank_items(question: str, items: list[dict], k: int = 4) -> list[dict]:
     scored.sort(key=lambda x: x[0], reverse=True)
     return [item for _, item in scored[:k]]
 
-from app.embeddings.embedder import embed_texts
-from app.llm.client import chat
-from app.vectordb.chroma_store import ChromaStore
+
 
 def rag_answer_with_store(question: str, store, k: int = 4, where: dict | None = None, retrieve_k: int = 10) -> str:
-    query_embedding = embed_texts([question])[0]
-
-    candidates = store.query_full(query_embedding, k=retrieve_k, where=where)
+    candidates = hybrid_retrieve(
+        store=store,
+        question=question,
+        k=retrieve_k,
+        where=where
+    )
+    
     items = rerank_items(question, candidates, k=k)
 
-    contexts = store.query(query_embedding, k=k,  where=where)
+    contexts = [
+    item.get("text") or item.get("document") or ""
+    for item in items
+]
 
    
 
@@ -101,13 +111,19 @@ from app.llm.client import chat
 
 
 def rag_answer_with_sources(question: str, store, k: int = 4, where: dict | None = None, retrieve_k: int = 10):
-    query_embedding = embed_texts([question])[0]
+    candidates = hybrid_retrieve(
+        store=store,
+        question=question,
+        k=retrieve_k,
+        where=where
+    )
 
-
-    candidates = store.query_full(query_embedding, k=retrieve_k, where=where)
     items = rerank_items(question, candidates, k=k)
-
-    contexts = [item["text"] for item in items]
+   
+    contexts = [
+    item.get("text") or item.get("document") or ""
+    for item in items
+]
     messages = build_rag_prompt(question, contexts)
     answer = chat(messages)
 
@@ -117,7 +133,9 @@ def rag_answer_with_sources(question: str, store, k: int = 4, where: dict | None
         sources.append({
             "document_id": meta.get("document_id", "unknown"),
             "chunk_index": meta.get("chunk_index"),
-            "text": item["text"]
+            "text": item.get("text") or item.get("document") or "",
+            "retrieval_type": item.get("retrieval_type", "unknown"),
+            "hybrid_score": item.get("hybrid_score")
         })
 
     return {

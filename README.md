@@ -1,36 +1,36 @@
 # Planner RAG: Retrieval-Augmented Generation with Planner Routing
 
-Planner RAG is a production-style AI backend for source-grounded question answering over ingested knowledge.
+Planner RAG is a production-style **Retrieval-Augmented Generation (RAG)** backend that answers questions using only ingested knowledge.
 
-It combines **Retrieval-Augmented Generation (RAG)**, **planner-based routing**, **retrieval reranking**, and **evidence-constrained generation** to reduce hallucinations and make answers traceable to retrieved source chunks.
+It combines:
+- planner-based routing
+- hybrid retrieval (vector + BM25)
+- reranking
+- evidence-grounded generation
 
-Unlike basic RAG systems that send every query through the same retrieval path, Planner RAG first decides **how the question should be handled**. It supports:
+to produce **traceable, source-backed answers**.
 
-- **single-document retrieval** for focused questions
-- **multi-document retrieval** for comparisons and synthesis
-- **unsupported-query refusal** when the answer cannot be grounded safely
+## Pipeline
 
-This makes the system more controllable, more explainable, and easier to evaluate.
-
-## Overview
-
-The project is built around a **planner → retriever → generator** pipeline:
-
-    User Question
-        ↓
-    Planner Agent
-        ↓
-    Execution Router
-        ↓
-    Vector Retrieval (ChromaDB)
-        ↓
-    Reranking
-        ↓
-    LLM Generation
-        ↓
+   
+    User Question  
+    ↓  
+    Planner Agent (route: single / multi / unknown)  
+    ↓  
+    Execution Router  
+    ↓  
+    Hybrid Retrieval  
+      • Vector Search (ChromaDB)  
+      • BM25 Search (Whoosh)  
+    ↓  
+    Fusion (Reciprocal Rank Fusion - RRF)  
+    ↓  
+    Reranking  
+    ↓  
+    LLM Generation  
+    ↓  
     Answer + Sources
 
-The planner decides whether a question should be answered from one document, multiple documents, or refused if it falls outside the supported knowledge base.
 
 ## Key Features
 
@@ -42,7 +42,7 @@ Questions are classified before retrieval begins. The planner chooses one of thr
 - `multi` — compare or combine evidence from multiple documents
 - `unknown` — refuse unsupported or unsafe questions
 
-This routing layer makes the system safer and more structured than a one-size-fits-all RAG pipeline.
+
 
 ### Persistent vector knowledge base
 
@@ -58,19 +58,28 @@ Documents are chunked, embedded, and stored in **ChromaDB** with persistent meta
 
 The ingestion pipeline prevents duplicate content using **SHA256 hashing** and also guards against document ID conflicts.
 
+### Hybrid retrieval (BM25 + vector search)
+
+The system combines:
+
+- **Dense retrieval (ChromaDB)** for semantic similarity
+- **Lexical retrieval (Whoosh BM25)** for exact keyword matching
+- **Reciprocal Rank Fusion (RRF)** to merge both rankings
+
+
+
+
 ### Retrieval reranking
 
 Retrieved chunks are reranked before generation to improve relevance and answer quality.
 
-### Evidence-grounded generation
 
-Answers are generated only from retrieved evidence. Each grounded response includes the supporting source chunks used to produce it.
 
-### Multi-document reasoning
+### Answer Generation
 
-The system can handle comparative questions across documents, such as:
-
-`Compare PostgreSQL MVCC with SQL Server snapshot isolation.`
+- Answers are generated only from retrieved evidence  
+- Each response includes source attribution  
+- Supports multi-document reasoning for comparisons and synthesis  
 
 ### Evaluation suite
 
@@ -81,27 +90,7 @@ The project includes automated evaluation for:
 - grounded answer behavior
 - source attribution presence
 
-### Streamlit frontend
 
-A lightweight Streamlit interface makes it easy to:
-
-- ingest documents
-- ask routed questions
-- inspect answers and supporting sources
-- browse the knowledge base
-
-## What the Project Does
-
-Planner RAG allows you to:
-
-- ingest documents into a persistent vector database
-- prevent duplicate ingestion using content hashing
-- classify questions through a planner layer
-- retrieve relevant chunks from ChromaDB
-- rerank retrieved chunks for stronger relevance
-- generate answers constrained to retrieved evidence
-- return supporting source chunks with each answer
-- inspect the system through a simple frontend
 
 ## Architecture
 
@@ -150,30 +139,19 @@ Used when the question cannot be grounded in the ingested knowledge base or fall
 
 Example: `What is the capital of Japan?`
 
-This explicit routing design improves reliability and makes system behavior easier to test.
-
-## API Endpoints
-
-### `POST /ingest`
-
-Ingest a document into the knowledge base.
-
-#### Example request
-
-```json
-{
-  "document_id": "db_postgres",
-  "text": "PostgreSQL uses MVCC..."
-}
-```
 
 
-#### Possible statuses
+### Manual routing override
 
-- `ingested`
-- `duplicate`
-- `conflict`
-- `no content`
+The API also allows explicit routing by providing document identifiers:
+
+- `document_id` → forces single-document retrieval
+- `document_ids` → forces multi-document retrieval
+
+This bypasses the planner and allows precise control over which documents are used during retrieval.
+
+
+
 
 ### `POST /ask`
 
@@ -247,31 +225,23 @@ The evaluation checks:
 - answer behavior
 - source presence
 
-### Example output
 
-    Planner: 4/4
-    API route: 4/4
-    Answer behavior: 4/4
-    Sources presence: 4/4
-
-This makes it easier to validate that the system is not only functional, but also behaving as intended.
 
 ## Current Limitations
 
 The current version has a few intentional limitations:
 
-- document routing depends on a curated registry
-- planner coverage is limited to supported domains
+- planner coverage is limited to supported question patterns
 - retrieval quality depends on chunking and metadata quality
-- reranking is currently simple and can be improved
-- new unsupported domains may require manual routing updates
+- reranking is currently heuristic-based (keyword overlap)
+- no document deletion or update support yet
+- frontend does not expose all retrieval diagnostics
 
 ## Future Improvements
 
 Planned or possible next steps include:
 
 - dynamic document registry from ingestion metadata
-- hybrid retrieval (`BM25 + vector search`)
 - stronger reranking with cross-encoders
 - query rewriting before retrieval
 - streaming responses
@@ -279,13 +249,7 @@ Planned or possible next steps include:
 - richer frontend debugging and analytics views
 - more advanced evaluation coverage
 
-## Why This Project Matters
 
-Many RAG demos stop at basic retrieval and generation.
-
-Planner RAG goes a step further by introducing **explicit routing**, **grounded answer generation**, **source attribution**, and **evaluation-aware design**. The result is a more controlled and inspectable backend for knowledge-grounded QA.
-
-This project is meant to reflect a more production-oriented approach to building LLM systems.
 
 ## License
 

@@ -4,10 +4,11 @@ from pydantic import BaseModel
 import uuid
 
 # ---- Core RAG imports ----
-from app.ingestion.chunker import base_chunks
+from app.ingestion.chunker import base_chunks, apply_overlap
 from app.embeddings.embedder import embed_texts
 from app.vectordb.chroma_store import ChromaStore
 from app.rag.pipeline import rag_answer_with_store, rag_answer_with_sources
+from app.rag.hybrid_retriever import hybrid_retrieve
 from app.utils.hash import hash_text
 from app.llm.client import chat
 
@@ -23,7 +24,10 @@ from app.orchestration.planner import plan_question
 # -------------------------------------------------------------------
 app = FastAPI(title="RAG API", version="1.0")
 store = ChromaStore(collection_name="api-demo")
-
+# -------------------------------------------------------------------
+# ---- Whoosh imports ----
+# -------------------------------------------------------------------
+from app.vectordb.whoosh_index import add_chunks_to_whoosh
 
 # -------------------------------------------------------------------
 # Schemas
@@ -31,6 +35,7 @@ store = ChromaStore(collection_name="api-demo")
 class QuestionRequest(BaseModel):
     question: str
     document_id: str | None = None
+    document_ids: list[str] | None = None
     owner: str | None = None
 
 
@@ -38,6 +43,8 @@ class SourceItem(BaseModel):
     document_id: str
     chunk_index: int | None = None
     text: str
+    retrieval_type: str | None = None
+    hybrid_score: float | None = None
 
 
 class AnswerResponse(BaseModel):
@@ -107,6 +114,7 @@ def ingest(req: IngestRequest):
 
     # 1) Chunk
     chunks = base_chunks(req.text)
+    chunks = apply_overlap(chunks, overlap=1)
     if not chunks:
         return {"status": "no content"}
 
@@ -119,6 +127,7 @@ def ingest(req: IngestRequest):
 
     for i in range(len(chunks)):
         meta = {
+            "chunk_id": ids[i],
             "document_id": req.document_id,
             "doc_hash": doc_hash,
             "chunk_index": i,
@@ -128,13 +137,25 @@ def ingest(req: IngestRequest):
         if req.owner:
             meta["owner"] = req.owner
         metadatas.append(meta)
+    whoosh_chunks = []
 
+    for i in range(len(chunks)):
+        whoosh_chunks.append({
+            "chunk_id": ids[i],
+            "document_id": req.document_id,
+            "chunk_index": i,
+            "source": req.source or "",
+            "owner": req.owner or "",
+            "text": chunks[i],
+        })
     store.add_texts(
         ids=ids,
         texts=chunks,
         embeddings=embeddings,
         metadatas=metadatas
     )
+    add_chunks_to_whoosh(whoosh_chunks)
+    
 
     return {"status": "ingested", "chunks_added": len(chunks)}
 
@@ -167,9 +188,9 @@ def debug_retrieve(req: QuestionRequest):
     if not where:
         where = None
 
-    query_embedding = embed_texts([req.question])[0]
-    results = store.query_with_scores(
-        query_embedding=query_embedding,
+    results = hybrid_retrieve(
+        store=store,
+        question=req.question,
         k=5,
         where=where
     )
@@ -262,7 +283,19 @@ def get_document_chunks(document_id: str):
 # -------------------------------------------------------------------
 @app.post("/ask_routed", response_model=AnswerResponse)
 def ask_routed(req: QuestionRequest):
-    decision = plan_question(req.question)
+    # ---- Override planner if user provides document_ids ----
+    if req.document_ids and len(req.document_ids) == 2:
+        decision = {
+            "route": "multi",
+            "targets": req.document_ids
+        }
+    elif req.document_id:
+        decision = {
+            "route": "single",
+            "targets": [req.document_id]
+        }
+    else:
+        decision = plan_question(req.question)
 
     # ---------- UNKNOWN / UNSUPPORTED ----------
     if decision["route"] == "unknown":
@@ -280,7 +313,7 @@ def ask_routed(req: QuestionRequest):
                 where["owner"] = req.owner
         elif len(decision["targets"]) == 1:
             target = decision["targets"][0]
-            where = {"document_id": DOC_REGISTRY[target]["document_id"]}
+            where = {"document_id": target}
             if req.owner:
                 where["owner"] = req.owner
         else:
@@ -312,9 +345,7 @@ def ask_routed(req: QuestionRequest):
                 "sources": []
             }
 
-        t1, t2 = decision["targets"]
-        doc1 = DOC_REGISTRY[t1]["document_id"]
-        doc2 = DOC_REGISTRY[t2]["document_id"]
+        doc1, doc2 = decision["targets"]
 
         ctx1 = retrieve_for_document(store, req.question, doc1)
         ctx2 = retrieve_for_document(store, req.question, doc2)
@@ -326,8 +357,8 @@ def ask_routed(req: QuestionRequest):
                 "sources": []
             }
 
-        contexts1 = [item["text"] for item in ctx1]
-        contexts2 = [item["text"] for item in ctx2]
+        contexts1 = [item.get("text") or item.get("document") or "" for item in ctx1]
+        contexts2 = [item.get("text") or item.get("document") or "" for item in ctx2]   
 
         messages = build_compare_prompt(req.question, contexts1, contexts2)
         answer = chat(messages)
@@ -338,7 +369,9 @@ def ask_routed(req: QuestionRequest):
             sources.append({
                 "document_id": meta.get("document_id", "unknown"),
                 "chunk_index": meta.get("chunk_index"),
-                "text": item["text"]
+                "text": item.get("text") or item.get("document") or "",
+                "retrieval_type": item.get("retrieval_type", "unknown"),
+                "hybrid_score": item.get("hybrid_score")
             })
 
         return {
