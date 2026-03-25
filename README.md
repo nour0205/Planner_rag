@@ -12,31 +12,9 @@ to produce **traceable, source-backed answers**.
 
 ## Pipeline
 
-User Question
-      │
-      ▼
-Planner Agent (route: single / multi / unknown)
-      │
-      ▼
-Execution Router
-      │
-      ▼
-Hybrid Retrieval
-  ├── Vector Search (ChromaDB)
-  └── BM25 Search (Whoosh)
-      │
-      ▼
-Reciprocal Rank Fusion (RRF)
-      │
-      ▼
-Reranking
-      │
-      ▼
-LLM Generation
-      │
-      ▼
-Answer + Sources
-
+<p align="center">
+  <img src="Pipeline.png" width="450"/>
+</p>
 
 ## Key Features
 
