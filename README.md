@@ -1,6 +1,6 @@
-# Planner RAG: Retrieval-Augmented Generation with Planner Routing
+# RAGent: Retrieval-Augmented Generation with Planner Routing
 
-Planner RAG is a production-style **Retrieval-Augmented Generation (RAG)** backend that answers questions using only ingested knowledge.
+RAGent is a production-style **Retrieval-Augmented Generation (RAG)** backend that answers questions using only ingested knowledge.
 
 It combines:
 - planner-based routing
@@ -12,24 +12,30 @@ to produce **traceable, source-backed answers**.
 
 ## Pipeline
 
-   
-    User Question  
-    ↓  
-    Planner Agent (route: single / multi / unknown)  
-    ↓  
-    Execution Router  
-    ↓  
-    Hybrid Retrieval  
-      • Vector Search (ChromaDB)  
-      • BM25 Search (Whoosh)  
-    ↓  
-    Fusion (Reciprocal Rank Fusion - RRF)  
-    ↓  
-    Reranking  
-    ↓  
-    LLM Generation  
-    ↓  
-    Answer + Sources
+User Question
+      │
+      ▼
+Planner Agent (route: single / multi / unknown)
+      │
+      ▼
+Execution Router
+      │
+      ▼
+Hybrid Retrieval
+  ├── Vector Search (ChromaDB)
+  └── BM25 Search (Whoosh)
+      │
+      ▼
+Reciprocal Rank Fusion (RRF)
+      │
+      ▼
+Reranking
+      │
+      ▼
+LLM Generation
+      │
+      ▼
+Answer + Sources
 
 
 ## Key Features
