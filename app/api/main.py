@@ -11,6 +11,8 @@ from app.rag.pipeline import rag_answer_with_store, rag_answer_with_sources
 from app.rag.hybrid_retriever import hybrid_retrieve
 from app.utils.hash import hash_text
 from app.llm.client import chat
+from app.catalog.document_catalog import upsert_document_entry
+from app.rag.document_selector import select_documents
 
 # ---- Orchestration imports ----
 from app.orchestration.registry import DOC_REGISTRY
@@ -157,7 +159,16 @@ def ingest(req: IngestRequest):
     )
     add_chunks_to_whoosh(whoosh_chunks)
     
+    preview = chunks[0][:300] if chunks else ""
 
+    upsert_document_entry({
+        "document_id": req.document_id,
+        "title": req.document_id,
+        "preview": preview,
+        "chunk_count": len(chunks),
+        "source": req.source,
+        "owner": req.owner,
+    })
     return {"status": "ingested", "chunks_added": len(chunks)}
 
 
@@ -284,7 +295,7 @@ def get_document_chunks(document_id: str):
 # -------------------------------------------------------------------
 @app.post("/ask_routed", response_model=AnswerResponse)
 def ask_routed(req: QuestionRequest):
-    # ---- Override planner if user provides document_ids ----
+    # ---- explicit override from user ----
     if req.document_ids and len(req.document_ids) == 2:
         decision = {
             "route": "multi",
@@ -296,7 +307,39 @@ def ask_routed(req: QuestionRequest):
             "targets": [req.document_id]
         }
     else:
-        decision = plan_question(req.question)
+        selected_docs = select_documents(req.question, store, top_k=2)
+
+        if not selected_docs:
+            decision = {
+                "route": "unknown",
+                "targets": []
+            }
+        elif len(selected_docs) == 1:
+            decision = {
+                "route": "single",
+                "targets": [selected_docs[0]["document_id"]]
+            }
+        else:
+            question_lower = req.question.lower()
+            compare_signals = ["compare", "difference", "vs", "versus", "both", "between"]
+
+            is_multi = any(signal in question_lower for signal in compare_signals)
+
+            if is_multi:
+                decision = {
+                    "route": "multi",
+                    "targets": [
+                        selected_docs[0]["document_id"],
+                        selected_docs[1]["document_id"],
+                    ]
+                }
+            else:
+                decision = {
+                    "route": "single",
+                    "targets": [selected_docs[0]["document_id"]]
+                }
+
+    print("\n[DEBUG] routing decision:", decision)
 
     # ---------- UNKNOWN / UNSUPPORTED ----------
     if decision["route"] == "unknown":
@@ -307,18 +350,19 @@ def ask_routed(req: QuestionRequest):
         }
 
     # ---------- SINGLE DOCUMENT ----------
-        # ---------- SINGLE DOCUMENT ----------
     if decision["route"] == "single":
         if req.document_id:
-            target = normalize_document_id(req.document_id)
+            target = req.document_id
         elif len(decision["targets"]) == 1:
-            target = normalize_document_id(decision["targets"][0])
+            target = decision["targets"][0]
         else:
             return {
                 "answer": "I don't know.",
                 "route": "single",
                 "sources": []
             }
+
+        target = normalize_document_id(target)
 
         where = {"document_id": target}
         if req.owner:
@@ -364,7 +408,7 @@ def ask_routed(req: QuestionRequest):
             }
 
         contexts1 = [item.get("text") or item.get("document") or "" for item in ctx1]
-        contexts2 = [item.get("text") or item.get("document") or "" for item in ctx2]   
+        contexts2 = [item.get("text") or item.get("document") or "" for item in ctx2]
 
         messages = build_compare_prompt(req.question, contexts1, contexts2)
         answer = chat(messages)
@@ -392,7 +436,6 @@ def ask_routed(req: QuestionRequest):
         "sources": []
     }
 
-
 # -------------------------------------------------------------------
 # DEBUG: Planning
 # -------------------------------------------------------------------
@@ -400,3 +443,44 @@ def ask_routed(req: QuestionRequest):
 def debug_plan(req: QuestionRequest):
     plan = plan_question(req.question)
     return {"question": req.question, "plan": plan}
+
+# -------------------------------------------------------------------
+# DEBUG: Re-build catalogue
+# -------------------------------------------------------------------
+@app.post("/debug/rebuild_catalog")
+def rebuild_catalog():
+    data = store.collection.get(include=["metadatas", "documents"])
+
+    metadatas = data.get("metadatas", []) or []
+    documents = data.get("documents", []) or []
+
+    grouped = {}
+
+    for meta, doc_text in zip(metadatas, documents):
+        if not meta:
+            continue
+
+        document_id = meta.get("document_id")
+        if not document_id:
+            continue
+
+        if document_id not in grouped:
+            grouped[document_id] = {
+                "document_id": document_id,
+                "title": document_id,
+                "preview": (doc_text or "")[:300],
+                "chunk_count": 0,
+                "source": meta.get("source"),
+                "owner": meta.get("owner"),
+            }
+
+        grouped[document_id]["chunk_count"] += 1
+
+    for entry in grouped.values():
+        upsert_document_entry(entry)
+
+    return {
+        "status": "rebuilt",
+        "documents_added": len(grouped),
+        "documents": list(grouped.keys())
+    }

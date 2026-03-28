@@ -1,14 +1,10 @@
-# RAGent: Retrieval-Augmented Generation with Planner Routing
+# RAGent
 
-RAGent is a production-style **Retrieval-Augmented Generation (RAG)** backend that answers questions using only ingested knowledge.
+RAGent is a retrieval-first backend that answers questions strictly from ingested documents.
 
-It combines:
-- planner-based routing
-- hybrid retrieval (vector + BM25)
-- reranking
-- evidence-grounded generation
+It uses hybrid retrieval, dynamic document selection, and grounded generation to produce source-backed answers.
 
-to produce **traceable, source-backed answers**.
+
 
 ## Pipeline
 
@@ -18,67 +14,19 @@ to produce **traceable, source-backed answers**.
 
 ## Key Features
 
-### Planner-based routing
-
-Questions are classified before retrieval begins. The planner chooses one of three routes:
-
-- `single` — answer using one target document
-- `multi` — compare or combine evidence from multiple documents
-- `unknown` — refuse unsupported or unsafe questions
-
-
-
-### Persistent vector knowledge base
-
-Documents are chunked, embedded, and stored in **ChromaDB** with persistent metadata, including:
-
-- document ID
-- chunk index
-- source
-- owner
-- document hash
-
-### Ingestion safety
-
-The ingestion pipeline prevents duplicate content using **SHA256 hashing** and also guards against document ID conflicts.
-
-### Hybrid retrieval (BM25 + vector search)
-
-The system combines:
-
-- **Dense retrieval (ChromaDB)** for semantic similarity
-- **Lexical retrieval (Whoosh BM25)** for exact keyword matching
-- **Reciprocal Rank Fusion (RRF)** to merge both rankings
-
-
-
-
-### Retrieval reranking
-
-Retrieved chunks are reranked before generation to improve relevance and answer quality.
-
-
-
-### Answer Generation
-
-- Answers are generated only from retrieved evidence  
-- Each response includes source attribution  
-- Supports multi-document reasoning for comparisons and synthesis  
-
-### Evaluation suite
-
-The project includes automated evaluation for:
-
-- planner routing correctness
-- API route behavior
-- grounded answer behavior
-- source attribution presence
+- **Dynamic document selection** — automatically selects relevant documents from a catalog  
+- **Hybrid retrieval** — combines semantic search (vector) and keyword search (BM25)  
+- **Reranking** — improves relevance before generation  
+- **Grounded answers** — responses include source attribution  
+- **Document catalog** — enables scalable document lookup  
+- **Ingestion safety** — prevents duplicates via hashing  
+- **Evaluation suite** — tests routing, grounding, and sources  
 
 
 
 ## Architecture
 
-The system follows a modular backend structure:
+The system follows a retrieval-first architecture:
 
     app/
     ├── api/            FastAPI endpoints
@@ -101,71 +49,17 @@ The system follows a modular backend structure:
     README.md
 
 
-## Routing Behavior
-
-The planner explicitly selects one of the following execution paths:
-
-### `single`
-
-Used when the question targets one document or one system.
-
-Example: `How does MVCC work in PostgreSQL?`
-
-### `multi`
-
-Used when the question asks for comparison, contrast, or synthesis across multiple targets.
-
-Example: `Compare PostgreSQL MVCC with SQL Server snapshot isolation.`
-
-### `unknown`
-
-Used when the question cannot be grounded in the ingested knowledge base or falls outside supported routing behavior.
-
-Example: `What is the capital of Japan?`
-
-
-
-### Manual routing override
-
-The API also allows explicit routing by providing document identifiers:
-
-- `document_id` → forces single-document retrieval
-- `document_ids` → forces multi-document retrieval
-
-This bypasses the planner and allows precise control over which documents are used during retrieval.
-
-
-
-
 ### `POST /ask`
-
-Run a standard single-document RAG query.
+Single-document query.
 
 ### `POST /ask_routed`
-
-Run planner-based question answering with routed retrieval.
-
-#### Example response
-
-    {
-      "answer": "...",
-      "route": "single",
-      "sources": [
-        {
-          "document_id": "db_postgres",
-          "chunk_index": 1,
-          "text": "MVCC works by keeping multiple versions..."
-        }
-      ]
-    }
+Query with dynamic document selection and routing.
 
 ### `GET /documents`
-
-Return a grouped summary of ingested documents in the knowledge base.
+List all documents.
 
 ### `GET /documents/{document_id}`
-
-Return all stored chunks for a specific document.
+Get document chunks.
 
 ## Running the Project
 
@@ -188,13 +82,9 @@ Frontend: `http://localhost:8501`
 
 ## Frontend
 
-The Streamlit app includes three core views:
-
-- **Ask Questions** — submit routed queries and inspect answers
-- **Ingest Document** — add new knowledge to the vector database
-- **Knowledge Base** — browse ingested documents and chunk previews
-
-The frontend is designed for quick demos, debugging, and inspection of grounded system behavior.
+- Ask questions  
+- Ingest documents  
+- Browse knowledge base  
 
 ## Evaluation
 
@@ -202,37 +92,22 @@ Run the evaluation suite with:
 
     python run_eval.py
 
-The evaluation checks:
+Checks routing, grounding, and source attribution.
 
-- planner routing correctness
-- API route selection
-- answer behavior
-- source presence
+## Limitations
 
-
-
-## Current Limitations
-
-The current version has a few intentional limitations:
-
-- planner coverage is limited to supported question patterns
-- retrieval quality depends on chunking and metadata quality
-- reranking is currently heuristic-based (keyword overlap)
-- no document deletion or update support yet
-- frontend does not expose all retrieval diagnostics
+- keyword-based document selection  
+- heuristic reranking  
+- no document update/delete  
+- limited frontend diagnostics  
 
 ## Future Improvements
 
-Planned or possible next steps include:
-
-- dynamic document registry from ingestion metadata
-- stronger reranking with cross-encoders
-- query rewriting before retrieval
-- streaming responses
-- document deletion and management tools
-- richer frontend debugging and analytics views
-- more advanced evaluation coverage
-
+- semantic document selection  
+- better reranking (cross-encoders)  
+- query rewriting  
+- streaming responses  
+- document management  
 
 
 ## License
